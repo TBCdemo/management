@@ -13015,7 +13015,8 @@
       adminOnly: true,
       children: [
         { id: "roles", label: "角色權限", href: "access.html#roles" },
-        { id: "modules", label: "模組管理", href: "access.html#modules" }
+        { id: "modules", label: "模組管理", href: "access.html#modules" },
+        { id: "people", label: "人員授權", href: "access.html#people" }
       ]
     }
   ];
@@ -14943,7 +14944,7 @@
   document.head.appendChild(style);
   var supabase = window.__TBC_SB || window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
   window.__TBC = { React: import_react6.default, supabase };
-  var ACCESS_ROUTES = ["roles", "modules"];
+  var ACCESS_ROUTES = ["roles", "modules", "people"];
   var readAccessRoute = () => {
     const r = (window.location.hash || "").replace("#", "");
     return ACCESS_ROUTES.includes(r) ? r : "roles";
@@ -15117,12 +15118,172 @@
               h("tbody", null, feats.map((f) => h("tr", { key: f.key, style: { borderTop: "1px solid #f1f5f9" } },
                 h("td", { style: { padding: "8px", minWidth: 150 } }, f.name,
                   null),
+                !f.enforced ? h("td", { colSpan: cols.length, style: { textAlign: "center", padding: "8px", color: "#64748b", fontSize: 13 } }, "登入即可使用，不需設定") :
                 cols.map((r) => {
                   const on = !!d.fr[f.key + "|" + r.key];
                   return h("td", { key: r.key, style: { textAlign: "center", padding: "4px" } },
                     h(AxCheck, { on, onClick: () => toggle(f, r) }));
                 })))))));
       }));
+  };
+  var usePeopleData = (sb) => {
+    const [d, setD] = (0, import_react6.useState)({ loading: true, error: "", people: [], roles: [] });
+    const [tick, setTick] = (0, import_react6.useState)(0);
+    (0, import_react6.useEffect)(() => {
+      let alive = true;
+      (async () => {
+        try {
+          const [m, ac, r, pr] = await Promise.all([
+            sb.from("members").select("id,name,email,group_id").order("name"),
+            sb.rpc("admin_list_accounts"),
+            sb.from("app_roles").select("*").order("sort_order"),
+            sb.rpc("admin_get_pending_roles")
+          ]);
+          for (const x of [m, ac, r, pr]) if (x.error) throw x.error;
+          const accMap = {};
+          (ac.data || []).forEach((a) => { accMap[String(a.account || "").trim().toLowerCase()] = a; });
+          const pend = {};
+          (pr.data || []).forEach((p) => { (pend[p.member_id] = pend[p.member_id] || []).push(p.role); });
+          const toKey = (e) => { const v = String(e || "").trim().toLowerCase(); return !v ? "" : v.includes("@") ? v : v + "@tbc.gmail.com"; };
+          const people = (m.data || []).filter((x) => !String(x.name || "").startsWith("SYSTEM_")).map((x) => {
+            const key = toKey(x.email);
+            const acct = key ? accMap[key] : void 0;
+            const roles = acct ? (acct.roles || [acct.role]) : ["member"].concat(pend[x.id] || []);
+            return { id: x.id, name: x.name, login: x.email || "", uid: acct ? acct.user_uid : null, registered: !!acct, shared: !!acct && acct.member_count > 1, roles };
+          });
+          if (alive) setD({ loading: false, error: "", people, roles: r.data || [] });
+        } catch (e) {
+          if (alive) setD((p) => ({ ...p, loading: false, error: e.message || String(e) }));
+        }
+      })();
+      return () => { alive = false; };
+    }, [tick]);
+    return [d, () => setTick((t) => t + 1)];
+  };
+  var BlueCheck = ({ on }) => import_react6.default.createElement("span", { style: { width: 20, height: 20, borderRadius: 5, flexShrink: 0, position: "relative", display: "inline-block", boxSizing: "border-box", background: on ? "#2196F3" : "#fff", border: on ? "2px solid #2196F3" : "2px solid #cbd5e1", transition: "all .2s" } }, on && import_react6.default.createElement("span", { style: { position: "absolute", left: 5, top: 1, width: 5, height: 10, border: "solid #fff", borderWidth: "0 2px 2px 0", transform: "rotate(45deg)" } }));
+  var RolePicker = ({ roles, checked, onChange, countOf }) => {
+    const h = import_react6.default.createElement;
+    const [open, setOpen] = (0, import_react6.useState)(false);
+    const ref = (0, import_react6.useRef)(null);
+    (0, import_react6.useEffect)(() => {
+      const f = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+      document.addEventListener("mousedown", f);
+      return () => document.removeEventListener("mousedown", f);
+    }, []);
+    const on = roles.filter((r) => checked[r.key]);
+    const label = on.length === 0 ? "身分選取" : on.length === roles.length ? "全部身分" : on.map((r) => r.name).join("、");
+    const link = { border: "none", background: "transparent", color: "#2563eb", textDecoration: "underline", cursor: "pointer", fontSize: 14, padding: 0 };
+    return h("div", { ref, style: { position: "relative" } },
+      h("button", { type: "button", onClick: () => setOpen(!open), style: { display: "flex", alignItems: "center", gap: 10, border: open ? "1.5px solid #2196F3" : "1px solid #cbd5e1", background: "#fff", borderRadius: 10, padding: "9px 12px", fontSize: 15, cursor: "pointer", minWidth: 150, maxWidth: 260, justifyContent: "space-between" } },
+        h("span", { style: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } }, label), h(ChevronDown, { size: 18 })),
+      open && h("div", { style: { position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 30, minWidth: 280, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, boxShadow: "0 8px 24px rgba(15,23,42,.12)" } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 } },
+          h("span", { style: { color: "#475569", fontSize: 14 } }, "勾選要選取的身分"),
+          h("span", { style: { display: "flex", gap: 14 } },
+            h("button", { type: "button", style: link, onClick: () => { const c = {}; roles.forEach((r) => { c[r.key] = true; }); onChange(c); } }, "全選"),
+            h("button", { type: "button", style: link, onClick: () => onChange({}) }, "取消"))),
+        roles.map((r) => h("div", { key: r.key, onClick: () => onChange({ ...checked, [r.key]: !checked[r.key] }), style: { display: "flex", alignItems: "center", gap: 10, padding: "7px 2px", cursor: "pointer", fontSize: 15 } },
+          h(BlueCheck, { on: !!checked[r.key] }), h("span", { style: { flex: 1 } }, r.name), h("span", { style: AX.muted }, countOf(r.key) + "人")))));
+  };
+  var PeopleView = ({ sb }) => {
+    const h = import_react6.default.createElement;
+    const [d, reload] = usePeopleData(sb);
+    const [q, setQ] = (0, import_react6.useState)("");
+    const [filter, setFilter] = (0, import_react6.useState)("all");
+    const [sel, setSel] = (0, import_react6.useState)({});
+    const [batchRole, setBatchRole] = (0, import_react6.useState)("");
+    const [msg, setMsg] = (0, import_react6.useState)({ t: "", ok: true });
+    const [busy, setBusy] = (0, import_react6.useState)(false);
+    const nameOf = (k) => (d.roles.find((r) => r.key === k) || {}).name || k;
+    const manual = d.roles.filter((r) => r.enabled && r.key !== "member" && r.key !== "coworker");
+    (0, import_react6.useEffect)(() => { if (!batchRole && manual.length) setBatchRole(manual[0].key); }, [manual.length]);
+    const list = d.people.filter((p) => {
+      if (filter === "unreg" && p.registered) return false;
+      if (filter === "reg" && !p.registered) return false;
+      const t = q.trim().toLowerCase();
+      return !t || String(p.name).toLowerCase().includes(t) || String(p.login).toLowerCase().includes(t);
+    });
+    const selected = d.people.filter((p) => sel[p.id]);
+    const changeOne = async (p, key, on) => {
+      if (p.registered) {
+        return sb.rpc(on ? "admin_add_role" : "admin_remove_role", { p_user: p.uid, p_role: key });
+      }
+      const cur = p.roles.filter((r) => r !== "member" && r !== "coworker");
+      const next = on ? Array.from(new Set(cur.concat(key))) : cur.filter((r) => r !== key);
+      return sb.rpc("admin_set_pending_roles", { p_member: p.id, p_roles: next });
+    };
+    const toggleOne = async (p, key) => {
+      if (busy) return;
+      const on = !p.roles.includes(key);
+      if (key === "admin" && !on && !window.confirm("確定移除「" + p.name + "」的管理員身分？")) return;
+      setBusy(true); setMsg({ t: "", ok: true });
+      try {
+        const r = await changeOne(p, key, on);
+        if (r && r.error) throw r.error;
+        reload();
+      } catch (e) { setMsg({ t: "操作失敗：" + (e.message || e), ok: false }); }
+      setBusy(false);
+    };
+    const applyBatch = async (on) => {
+      if (busy || !selected.length || !batchRole) return;
+      const label = (on ? "加上" : "移除") + "「" + nameOf(batchRole) + "」";
+      if (!window.confirm("確定對 " + selected.length + " 人" + label + "？")) return;
+      setBusy(true); setMsg({ t: "", ok: true });
+      let okN = 0, skipN = 0; const fails = [];
+      for (const p of selected) {
+        if (p.roles.includes(batchRole) === on) { skipN++; continue; }
+        try {
+          const r = await changeOne(p, batchRole, on);
+          if (r && r.error) throw r.error;
+          okN++;
+        } catch (e) { fails.push(p.name + "（" + (e.message || e) + "）"); }
+      }
+      setMsg({ t: fails.length ? (on ? "新增" : "移除") + "失敗 " + fails.length + " 人：" + fails.join("、") : (on ? "新增完成" : "移除完成"), ok: !fails.length });
+      setBusy(false);
+      reload();
+    };
+    const [checkedRoles, setCheckedRoles] = (0, import_react6.useState)({});
+    const onPickRoles = (c) => {
+      setCheckedRoles(c);
+      const keys = Object.keys(c).filter((k) => c[k]);
+      const n = {};
+      if (keys.length) d.people.forEach((p) => { if (keys.some((k) => p.roles.includes(k))) n[p.id] = true; });
+      setSel(n);
+    };
+    const chip = (on, fixed) => ({ padding: "5px 12px", borderRadius: 8, fontSize: 13, cursor: fixed ? "default" : "pointer", border: on ? "2px solid #4f46e5" : "2px solid #f1f5f9", background: fixed ? "#f1f5f9" : on ? "#eef2ff" : "#f8fafc", color: fixed ? "#94a3b8" : on ? "#4338ca" : "#64748b", fontWeight: 500 });
+    const allSel = list.length > 0 && list.every((p) => sel[p.id]);
+    return h("div", { style: { maxWidth: 960, margin: "0 auto", padding: "32px 20px" } },
+      h("h1", { style: { fontSize: 24, fontWeight: 700, margin: 0 } }, "人員授權"),
+      h("div", { style: { height: 12 } }),
+      d.error && h("p", { style: { color: "#dc2626" } }, "讀取失敗：" + d.error),
+      msg.t && h("p", { style: { color: msg.ok ? "#15803d" : "#dc2626", fontSize: 14 } }, msg.t),
+      h("div", { style: { display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "center" } },
+        h("div", { style: { position: "relative", flex: 1, minWidth: 180 } },
+          h(Search, { size: 18, style: { position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "#64748b", pointerEvents: "none" } }),
+          h("input", { style: { width: "100%", boxSizing: "border-box", border: "none", background: "#f1f5f9", borderRadius: 12, padding: "10px 36px 10px 38px", fontSize: 15, outline: "none" }, placeholder: "搜尋", value: q, onChange: (e) => setQ(e.target.value) }),
+          q && h("button", { type: "button", "aria-label": "清除", onClick: () => setQ(""), style: { position: "absolute", right: 8, top: "50%", transform: "translateY(-50%)", border: "none", background: "transparent", cursor: "pointer", color: "#64748b", display: "flex", padding: 4 } }, h(X, { size: 16 }))),
+        h(RolePicker, { roles: d.roles.filter((r) => r.enabled), checked: checkedRoles, onChange: onPickRoles, countOf: (k) => d.people.filter((p) => p.roles.includes(k)).length }),
+        h("button", { style: AX.btn, onClick: () => { const n = { ...sel }; if (allSel) list.forEach((p) => { delete n[p.id]; }); else list.forEach((p) => { n[p.id] = true; }); setSel(n); } }, allSel ? "取消" : "全選"),
+        selected.length > 0 && h("button", { style: AX.btn, onClick: () => { setSel({}); setCheckedRoles({}); } }, "清除")),
+      selected.length > 0 && h("div", { style: { ...AX.card, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: 12, background: "#eef2ff", borderColor: "#c7d2fe" } },
+        h("span", { style: { fontWeight: 600 } }, "選取" + selected.length + "人"),
+        h("div", { role: "radiogroup", style: { display: "inline-flex", flexWrap: "wrap" } }, manual.map((r, i) => {
+          const on = batchRole === r.key;
+          return h("button", { key: r.key, type: "button", role: "radio", "aria-checked": on, onClick: () => setBatchRole(r.key), style: { border: "none", cursor: "pointer", position: "relative", zIndex: on ? 1 : 0, marginLeft: i ? 1 : 0, padding: "6px 14px", fontSize: 15, letterSpacing: ".05em", transition: "background-color .5s ease", boxShadow: on ? "0 0 0 1px #0043ed" : "0 0 0 1px #b5bfd9", background: on ? "#dee7ff" : "#fff", color: on ? "#0043ed" : "#3e4963", borderRadius: (i === 0 ? "6px 0 0 6px" : i === manual.length - 1 ? "0 6px 6px 0" : 0) } }, r.name);
+        })),
+        h("button", { style: AX.btnOn, disabled: busy, onClick: () => applyBatch(true) }, "新增"),
+        h("button", { style: AX.btn, disabled: busy, onClick: () => applyBatch(false) }, "移除")),
+      h("div", { style: AX.card },
+        d.loading ? h("p", { style: AX.muted }, "讀取中…") : list.length === 0 ? h("p", { style: AX.muted }, "沒有符合的人員") :
+        list.map((p, idx) => h("div", { key: p.id, style: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "10px 0", borderTop: idx ? "1px solid #f1f5f9" : "none" } },
+          h(AxCheck, { on: !!sel[p.id], onClick: () => setSel({ ...sel, [p.id]: !sel[p.id] }) }),
+          h("div", { style: { width: 170, minWidth: 130 } },
+            h("div", { style: { fontWeight: 600, fontSize: 15 } }, h("a", { href: "serve.html?member=" + encodeURIComponent(p.id) + "#members", title: "編輯同工資料", style: { color: "#1e293b", textDecoration: "underline", textDecorationColor: "#cbd5e1", textUnderlineOffset: 3 } }, p.name), !p.registered && h("span", { style: { ...AX.muted, marginLeft: 6, fontWeight: 400 } }, "未註冊")),
+            h("div", { style: { ...AX.muted, fontSize: 12 } }, p.login || "未填帳號", p.shared ? "・共用帳號" : "")),
+          h("div", { style: { display: "flex", gap: 6, flexWrap: "wrap", flex: 1 } },
+            h("span", { style: chip(true, true) }, nameOf("member")),
+            p.roles.includes("coworker") && h("span", { style: chip(true, true) }, nameOf("coworker")),
+            manual.map((r) => h("button", { key: r.key, type: "button", disabled: busy, style: chip(p.roles.includes(r.key), false), onClick: () => toggleOne(p, r.key) }, r.name)))))));
   };
   var AccessPage = ({ session, supabase: sb, shell }) => {
     const h = import_react6.default.createElement;
@@ -15138,6 +15299,7 @@
     if (!isAdmin) content = h("div", { className: "h-full flex items-center justify-center text-slate-500" }, "權限不足");
     else if (route === "roles") content = h(RolesView, { sb });
     else if (route === "modules") content = h(ModulesView, { sb });
+    else if (route === "people") content = h(PeopleView, { sb });
     else content = h(AccessHome, null);
     return h("div", { className: "flex h-[100dvh] w-full bg-slate-50 overflow-hidden relative" }, h(Sidebar, { active: "access", activeChild: route === "home" ? null : route, shell }), h("div", { className: "flex-1 min-w-0 h-full relative overflow-y-auto" }, content));
   };
